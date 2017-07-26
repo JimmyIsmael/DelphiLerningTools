@@ -1,0 +1,417 @@
+unit u_funciones_email;
+
+interface
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, StdCtrls,IdTCPConnection, IdTCPClient,IdText,
+  IdExplicitTLSClientServerBase, IdMessageClient, IdSMTPBase, IdSMTP,
+  IdComponent, IdIOHandler, IdIOHandlerSocket, IdIOHandlerStack, IdSSL,
+  IdSSLOpenSSL, IdBaseComponent, IdMessage,IdAttachmentFile,IdAttachment;
+
+
+procedure set_valores_conexion();
+procedure set_html(titulo:String;descripcion:String);overload;
+function enviar_email_simple(destinatario:string;asunto:string;texto:string):Boolean;
+function enviar_email_nombre(nombre:string;destinatario:string;asunto:string;texto:string):Boolean;
+function enviar_email_con_copia(destinatario:string;copiado_a:string;asunto:string;texto:string):Boolean;
+function enviar_email_con_copia_ciega(destinatario:string;copiado_a:string;copia_ciega_a:string;asunto:string;texto:string):Boolean;
+function enviar_email_adjunto(destinatario:string;asunto:string;texto:string;ruta_archivo:string):Boolean;
+function enviar_email_HTML(destinatario:string;asunto:string):Boolean;
+
+implementation
+ var
+ 
+ MailMessage: TIdMessage;
+ IdSSLIOHandlerSocketOpenSSL1: TIdSSLIOHandlerSocketOpenSSL;
+ IdSMTP1: TIdSMTP;
+ Attachment: TIdAttachment;
+ htmpart: TIdText;
+
+ servidor:String;
+ usuario:String;
+ contrasena:String;
+ puerto:Integer;
+ html:TStrings;
+ codigo_html:String;
+
+
+
+ //---Configuracion gmail---//
+ procedure set_valores_conexion();
+ begin
+  servidor:='smtp.gmail.com';
+  usuario:='tuemail@gmail.com';
+  contrasena:='tupass';
+  puerto:=587;
+ end;
+
+ procedure set_html();overload;
+ var
+  Txt: TextFile;
+  s: string;
+  todo:string;
+ begin
+  AssignFile(Txt, ExtractFilePath(Application.ExeName) + 'validation_request.html');
+  Reset(Txt);
+  while not Eof(Txt) do
+  begin
+    Readln(Txt, s);
+    todo:=todo+s;
+  end;
+    html := TStringList.Create();
+    html.Add(todo);
+    CloseFile(Txt);
+ end;
+
+ procedure set_html(titulo:String;descripcion:String);overload;
+ var
+  ruta:string;
+ begin
+    html := TStringList.Create();
+    html.Add('<html>');
+    html.Add('<head>');
+    html.Add('<link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/' +
+      'bootstrap.min.css" rel="stylesheet" integrity="sha384-' +
+      'BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">');
+    html.add('<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/' +
+      'bootstrap.min.js" integrity="sha384-' +
+      'Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" ' +
+      'crossorigin="anonymous"></script>');
+    html.Add('</head><body>');
+    ruta:='http://oi63.tinypic.com/21ccb3q.jpg';
+    html.Add('<div align="center" ><img src="'+ruta+'" width="150px" height="130px" /></div>');
+    html.Add('<h1 align="center">'+titulo+'</h1>');
+    html.Add('<p><h3 align="center">'+descripcion+'</h3></p>');
+    html.Add('<p><h3 align="center">Proceed to the Alfa system and validate the document.</h3></p>');
+    html.Add('<p><h6 align="center">Swisher Dominicana, Inc. Information Technology Department</h6></p>');
+ end;
+
+
+//*---------------Enviar mensaje por Email---------------*//
+function enviar_email_simple(destinatario:string;asunto:string;texto:string):Boolean;
+var
+  idSMTP1: TIdSMTP;
+begin
+  idSMTP1 := TIdSMTP.Create(nil);
+  MailMessage:=TIdMessage.Create(nil);
+  try
+    idSMTP1.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(idSMTP1);
+    idSMTP1.UseTLS := utUseExplicitTLS;
+    TIdSSLIOHandlerSocketOpenSSL(idSMTP1.IOHandler).SSLOptions.Method := sslvTLSv1;
+
+    set_valores_conexion;
+
+    idSMTP1.Host := servidor;
+    idSMTP1.Port := puerto;
+
+    MailMessage.From.Address := usuario;
+    MailMessage.Recipients.EMailAddresses := destinatario;
+
+    MailMessage.Subject := asunto;
+    MailMessage.Body.Text := texto;
+
+    idSMTP1.AuthType := satDefault;
+    idSMTP1.Username := usuario;
+    idSMTP1.Password := contrasena;
+
+    try
+      idSMTP1.Connect;
+      try
+        idSMTP1.Authenticate;
+        idSMTP1.PipeLine:=false;
+        idSMTP1.Send(MailMessage) ;
+      finally
+        idSMTP1.Disconnect;
+      end;
+      //ShowMessage('Mensaje Enviado Exitosamente.');
+      enviar_email_simple:=True;
+    except
+      on E: Exception do
+      begin
+        ShowMessage(Format('Failed!'#13'[%s] %s', [E.ClassName, E.Message]));
+        raise;
+      end;
+    end;
+  finally
+    idSMTP1.Free;
+end;
+end;
+//*-------------------end-----------------*//
+
+//*---------------Enviar mensaje por Email Con el nombre de la persona que lo envio---------------*//
+//*Funciona para cuentas de gmail y hotmail, ya que estas no toman el nombre de la configuarion de Outlook*//
+function enviar_email_nombre(nombre:string;destinatario:string;asunto:string;texto:string):Boolean;
+var
+  idSMTP1: TIdSMTP;
+begin
+  idSMTP1 := TIdSMTP.Create(nil);
+  MailMessage:=TIdMessage.Create(nil);
+  try
+    idSMTP1.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(idSMTP1);
+    idSMTP1.UseTLS := utUseExplicitTLS;
+    TIdSSLIOHandlerSocketOpenSSL(idSMTP1.IOHandler).SSLOptions.Method := sslvTLSv1;
+
+    set_valores_conexion;
+
+    idSMTP1.Host := servidor;
+    idSMTP1.Port := puerto;
+
+
+    MailMessage.From.Address := usuario;
+    MailMessage.From.Name:=nombre;
+    MailMessage.Recipients.EMailAddresses := destinatario;
+
+    MailMessage.Subject := asunto;
+    MailMessage.Body.Text := texto;
+
+    idSMTP1.AuthType := satDefault;
+    idSMTP1.Username := usuario;
+    idSMTP1.Password := contrasena;
+
+    try
+      idSMTP1.Connect;
+      try
+        idSMTP1.Authenticate;
+        idSMTP1.Send(MailMessage) ;
+      finally
+        idSMTP1.Disconnect;
+      end;
+      //ShowMessage('Mensaje Enviado Exitosamente.');
+      enviar_email_nombre:=True;
+    except
+      on E: Exception do
+      begin
+        ShowMessage(Format('Failed!'#13'[%s] %s', [E.ClassName, E.Message]));
+        raise;
+      end;
+    end;
+  finally
+    idSMTP1.Free;
+end;
+end;
+//*-------------------end-----------------*//
+
+//*---------------Enviar mensaje por Email con copia (CC)---------------*//
+function enviar_email_con_copia(destinatario:string;copiado_a:string;asunto:string;texto:string):Boolean;
+var
+  idSMTP1: TIdSMTP;
+begin
+  idSMTP1 := TIdSMTP.Create(nil);
+  MailMessage:=TIdMessage.Create(nil);
+  try
+    idSMTP1.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(idSMTP1);
+    idSMTP1.UseTLS := utUseExplicitTLS;
+    TIdSSLIOHandlerSocketOpenSSL(idSMTP1.IOHandler).SSLOptions.Method := sslvTLSv1;
+
+    set_valores_conexion;
+
+    idSMTP1.Host := servidor;
+    idSMTP1.Port := puerto;
+
+
+    MailMessage.From.Address := usuario;
+    MailMessage.Recipients.EMailAddresses := destinatario;
+    MailMessage.CCList.EMailAddresses:=copiado_a;
+
+    MailMessage.Subject := asunto;
+    MailMessage.Body.Text := texto;
+
+    idSMTP1.AuthType := satDefault;
+    idSMTP1.Username := usuario;
+    idSMTP1.Password := contrasena;
+
+    try
+      idSMTP1.Connect;
+      try
+        idSMTP1.Authenticate;
+        idSMTP1.Send(MailMessage) ;
+      finally
+        idSMTP1.Disconnect;
+      end;
+      //ShowMessage('Mensaje Enviado Exitosamente.');
+      enviar_email_con_copia:=True;
+    except
+      on E: Exception do
+      begin
+        ShowMessage(Format('Failed!'#13'[%s] %s', [E.ClassName, E.Message]));
+        raise;
+      end;
+    end;
+  finally
+    idSMTP1.Free;
+end;
+end;
+//*-------------------end-----------------*//
+
+//*---------------Enviar mensaje por Email con copia ciega (BCC)---------------*//
+{Las personas que reciban el email no podran ver a quien se le hace copia ciega
+ solo el que se envia como BCC puede ver todo}
+function enviar_email_con_copia_ciega(destinatario:string;copiado_a:string;copia_ciega_a:string;asunto:string;texto:string):Boolean;
+var
+  idSMTP1: TIdSMTP;
+begin
+  idSMTP1 := TIdSMTP.Create(nil);
+  MailMessage:=TIdMessage.Create(nil);
+  try
+    idSMTP1.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(idSMTP1);
+    idSMTP1.UseTLS := utUseExplicitTLS;
+    TIdSSLIOHandlerSocketOpenSSL(idSMTP1.IOHandler).SSLOptions.Method := sslvTLSv1;
+
+    set_valores_conexion;
+
+    idSMTP1.Host := servidor;
+    idSMTP1.Port := puerto;
+
+
+    MailMessage.From.Address := usuario;
+    MailMessage.Recipients.EMailAddresses := destinatario;
+    MailMessage.CCList.EMailAddresses:=copiado_a;
+    MailMessage.BccList.EMailAddresses:=copia_ciega_a;
+
+    MailMessage.Subject := asunto;
+    MailMessage.Body.Text := texto;
+
+    idSMTP1.AuthType := satDefault;
+    idSMTP1.Username := usuario;
+    idSMTP1.Password := contrasena;
+
+    try
+      idSMTP1.Connect;
+      try
+        idSMTP1.Authenticate;
+        idSMTP1.Send(MailMessage) ;
+      finally
+        idSMTP1.Disconnect;
+      end;
+      //ShowMessage('Mensaje Enviado Exitosamente.');
+      enviar_email_con_copia_ciega:=True;
+    except
+      on E: Exception do
+      begin
+        ShowMessage(Format('Failed!'#13'[%s] %s', [E.ClassName, E.Message]));
+        raise;
+      end;
+    end;
+  finally
+    idSMTP1.Free;
+end;
+end;
+//*-------------------end-----------------*//
+
+
+//*---------------Enviar mensaje por Email con archivo adjunto---------------*//
+function enviar_email_adjunto(destinatario:string;asunto:string;texto:string;ruta_archivo:string):Boolean;
+var
+  idSMTP1: TIdSMTP;
+begin
+  idSMTP1 := TIdSMTP.Create(nil);
+  MailMessage:=TIdMessage.Create(nil);
+  try
+    idSMTP1.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(idSMTP1);
+    idSMTP1.UseTLS := utUseExplicitTLS;
+    TIdSSLIOHandlerSocketOpenSSL(idSMTP1.IOHandler).SSLOptions.Method := sslvTLSv1;
+
+    set_valores_conexion;
+
+    idSMTP1.Host := servidor;
+    idSMTP1.Port := puerto;
+
+
+    MailMessage.From.Address := usuario;
+    MailMessage.Recipients.EMailAddresses := destinatario;
+
+
+    MailMessage.Subject := asunto;
+    MailMessage.Body.Text := texto;
+
+    Attachment:=TIdAttachmentFile.Create(MailMessage.MessageParts,ruta_archivo);
+
+    idSMTP1.AuthType := satDefault;
+    idSMTP1.Username := usuario;
+    idSMTP1.Password := contrasena;
+
+    try
+      idSMTP1.Connect;
+      try
+        idSMTP1.Authenticate;
+        idSMTP1.Send(MailMessage) ;
+      finally
+        idSMTP1.Disconnect;
+      end;
+      //ShowMessage('Mensaje Enviado Exitosamente.');
+      enviar_email_adjunto:=True;
+    except
+      on E: Exception do
+      begin
+        ShowMessage(Format('Failed!'#13'[%s] %s', [E.ClassName, E.Message]));
+        raise;
+      end;
+    end;
+  finally
+    idSMTP1.Free;
+end;
+end;
+//*-------------------end-----------------*//
+
+//*---------------Enviar mensaje por Email con contenido HTML---------------*//
+function enviar_email_HTML(destinatario:string;asunto:string):Boolean;
+var
+  idSMTP1: TIdSMTP;
+begin
+  idSMTP1 := TIdSMTP.Create(nil);
+  MailMessage:=TIdMessage.Create(nil);
+
+  try
+    idSMTP1.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(idSMTP1);
+    idSMTP1.UseTLS := utUseExplicitTLS;
+    TIdSSLIOHandlerSocketOpenSSL(idSMTP1.IOHandler).SSLOptions.Method := sslvTLSv1;
+
+    set_valores_conexion;
+    set_html(asunto,'Probando contenido HTML y modelado Bootstrap.');
+
+    idSMTP1.Host := servidor;
+    idSMTP1.Port := puerto;
+
+    MailMessage.From.Address := usuario;
+    MailMessage.Recipients.EMailAddresses := destinatario;
+
+    MailMessage.Subject := asunto;
+
+    MailMessage.ContentType := 'multipart/mixed';
+    MailMessage.Body.Assign(html);
+
+    htmpart := TIdText.Create(MailMessage.MessageParts, html);
+    htmpart.ContentType := 'text/html';
+
+    //MailMessage.Body.Text := texto;
+
+    idSMTP1.AuthType := satDefault;
+    idSMTP1.Username := usuario;
+    idSMTP1.Password := contrasena;
+
+    try
+      idSMTP1.Connect;
+      try
+        idSMTP1.Authenticate;
+        idSMTP1.PipeLine:=false;
+        idSMTP1.Send(MailMessage) ;
+      finally
+        idSMTP1.Disconnect;
+      end;
+      //ShowMessage('Mensaje Enviado Exitosamente.');
+      enviar_email_HTML:=True;
+    except
+      on E: Exception do
+      begin
+        ShowMessage(Format('Failed!'#13'[%s] %s', [E.ClassName, E.Message]));
+        raise;
+      end;
+    end;
+  finally
+    idSMTP1.Free;
+end;
+end;
+//*-------------------end-----------------*//
+
+
+end.
